@@ -13,19 +13,16 @@ AutoConfig.register("chess-model", ChessModelConfig)
 AutoModel.register(ChessModelConfig, ChessModel)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 model = AutoModel.from_pretrained(
     "darren-lo/chess-bot-model",
     cache_dir="./.model_cache"  # Cache locally
 )
 model = model.to(device=device)
 
-print("CDEF")
 
 @chess_manager.entrypoint
 def test_func(ctx: GameContext):
     try:
-        print("HELLO WORLD")
         """
         Called each time the model needs to make a move.
         Returns a python-chess Move object (legal move) for current position.
@@ -35,7 +32,6 @@ def test_func(ctx: GameContext):
         print(ctx.board.move_stack)
 
         legal_moves = list(ctx.board.generate_legal_moves())
-        print(legal_moves)
         if not legal_moves:
             ctx.logProbabilities({})
             raise ValueError("No legal moves available (probably lost)")
@@ -54,7 +50,6 @@ def test_func(ctx: GameContext):
         # Policy logits -> probabilities
         policy_probs = torch.softmax(policy_logits, dim=-1).squeeze(0)  # [num_moves]
 
-        print("FILTERING")
         # Filter out illegal moves
         legal_indices = []  # implement move_to_index
         for m in legal_moves:
@@ -65,7 +60,6 @@ def test_func(ctx: GameContext):
                 legal_indices.append(idx)
         legal_probs = policy_probs[legal_indices]
 
-        print("NORMALIZING")
         # Normalize to sum to 1
         legal_probs = legal_probs / legal_probs.sum()
         move_probs = {
@@ -77,8 +71,6 @@ def test_func(ctx: GameContext):
 
         # Pick the move with highest probability
         best_move = max(move_probs, key=move_probs.get)
-        print("BEST MOVE")
-        print(best_move)
         return best_move
     except Exception as e:
         print(e)
