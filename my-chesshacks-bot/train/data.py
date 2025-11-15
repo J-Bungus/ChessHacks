@@ -2,15 +2,29 @@ import torch
 from torch.utils.data import Dataset
 import chess
 import chess.engine
-import random
 import numpy as np
+import random
 
-class AlphaZeroChessDataset(Dataset):
+
+# ---- Move encoding utilities: 4672 legal UCI moves ----
+ALL_SQUARES = [f"{f}{r}" for f in "abcdefgh" for r in "12345678"]
+ALL_MOVES = []
+
+# quiet moves + captures + promotions
+for s1 in ALL_SQUARES:
+    for s2 in ALL_SQUARES:
+        ALL_MOVES.append(s1 + s2)
+        for promo in ["q", "r", "b", "n"]:
+            ALL_MOVES.append(s1 + s2 + promo)
+
+MOVE_TO_IDX = {m: i for i, m in enumerate(ALL_MOVES)}
+NUM_MOVES = len(ALL_MOVES)   # 4672
+
+
+class ChessPolicyDataset(Dataset):
     """
-    Self-contained dataset that:
-      - Generates random positions by playing random legal moves.
-      - Evaluates each position using Stockfish.
-      - Encodes positions using a simplified AlphaZero-style 119-plane representation.
+    Generates (18×8×8 board planes, best_move_index)
+    compatible with ChessPolicyModel.
     """
 
     def __init__(self,
@@ -21,123 +35,99 @@ class AlphaZeroChessDataset(Dataset):
 
         self.n_positions = n_positions
         self.max_random_moves = max_random_moves
-        self.stockfish_depth = stockfish_depth
+        self.depth = stockfish_depth
 
-        # Stockfish engine
         self.engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-
-        # Pre-generate dataset
         self.samples = []
+
         for _ in range(n_positions):
             board = self.random_position(max_random_moves)
-            value = self.evaluate(board)
-            features = self.encode_board(board)
-            self.samples.append((features, value))
 
-        # Close engine
+            best_move = self.get_best_move(board)
+            if best_move is None:
+                continue
+
+            x = self.encode_18_planes(board)
+            y = MOVE_TO_IDX[best_move.uci()]
+
+            self.samples.append((x, y))
+
         self.engine.quit()
 
     # ----------------------------------------------------------
-    #  Generate random positions
+    # Generate random position by randomly advancing the game
     # ----------------------------------------------------------
     def random_position(self, max_moves):
-        board = chess.Board()
-
-        n = random.randint(0, max_moves)
-        for _ in range(n):
-            if board.is_game_over():
+        b = chess.Board()
+        for _ in range(random.randint(0, max_moves)):
+            if b.is_game_over():
                 break
-            move = random.choice(list(board.legal_moves))
-            board.push(move)
-
-        return board
-
-    # ----------------------------------------------------------
-    #  Stockfish evaluation: returns a scalar value in [-1, 1]
-    # ----------------------------------------------------------
-    def evaluate(self, board):
-        info = self.engine.analyse(board, limit=chess.engine.Limit(depth=self.stockfish_depth))
-
-        score = info["score"].pov(board.turn)
-
-        # Mate scores: squash into [-1, 1]
-        if score.is_mate():
-            return torch.tensor(1.0 if score.mate() > 0 else -1.0)
-
-        # CP score: normalize (2000 cp → roughly winning)
-        cp = score.score()
-        return torch.tensor(max(-1.0, min(1.0, cp / 1000.0)), dtype=torch.float32)
+            move = random.choice(list(b.legal_moves))
+            b.push(move)
+        return b
 
     # ----------------------------------------------------------
-    # AlphaZero-style encoding (simplified)
-    # 119 planes:
-    #   12 piece planes (6x2 colors)
-    #   1 side-to-move plane
-    #   4 castling rights
-    #   1 repetition / move count (optional)
-    #   + filler to reach 119 planes if desired
+    # Stockfish best move
     # ----------------------------------------------------------
-    def encode_board(self, board):
+    def get_best_move(self, board):
+        info = self.engine.analyse(
+            board,
+            limit=chess.engine.Limit(depth=self.depth)
+        )
+        return info["pv"][0] if "pv" in info else None
+
+    # ----------------------------------------------------------
+    # 18-plane encoding to match your model
+    # ----------------------------------------------------------
+    def encode_18_planes(self, board):
         planes = []
 
-        # Piece type → plane index mapping
-        piece_map = {
-            chess.PAWN: 0,
-            chess.KNIGHT: 1,
-            chess.BISHOP: 2,
-            chess.ROOK: 3,
-            chess.QUEEN: 4,
-            chess.KING: 5,
-        }
+        piece_types = [chess.PAWN, chess.KNIGHT, chess.BISHOP,
+                    chess.ROOK, chess.QUEEN, chess.KING]
 
-        # 12 planes: white pieces then black pieces
-        for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP,
-                           chess.ROOK, chess.QUEEN, chess.KING]:
-
-            # White piece plane
-            p = np.zeros((8, 8), dtype=np.float32)
+        # 12 planes
+        for piece_type in piece_types:
+            p_white = np.zeros((8, 8), np.float32)
             for sq in board.pieces(piece_type, chess.WHITE):
                 r = 7 - chess.square_rank(sq)
                 c = chess.square_file(sq)
-                p[r, c] = 1.0
-            planes.append(p)
+                p_white[r, c] = 1.0
+            planes.append(p_white)
 
-            # Black piece plane
-            p = np.zeros((8, 8), dtype=np.float32)
+            p_black = np.zeros((8, 8), np.float32)
             for sq in board.pieces(piece_type, chess.BLACK):
                 r = 7 - chess.square_rank(sq)
                 c = chess.square_file(sq)
-                p[r, c] = 1.0
-            planes.append(p)
+                p_black[r, c] = 1.0
+            planes.append(p_black)
 
-        # Side-to-move
-        stm = np.ones((8, 8), dtype=np.float32) if board.turn == chess.WHITE else np.zeros((8, 8), dtype=np.float32)
+        # 1 plane: side to move
+        stm = np.ones((8, 8), np.float32) if board.turn == chess.WHITE else np.zeros((8, 8), np.float32)
         planes.append(stm)
 
-        # Castling rights
-        castling_planes = {
-            chess.BB_H1: board.has_kingside_castling_rights(chess.WHITE),
-            chess.BB_A1: board.has_queenside_castling_rights(chess.WHITE),
-            chess.BB_H8: board.has_kingside_castling_rights(chess.BLACK),
-            chess.BB_A8: board.has_queenside_castling_rights(chess.BLACK),
-        }
+        # 4 planes: castling rights
+        castling_features = [
+            board.has_kingside_castling_rights(chess.WHITE),
+            board.has_queenside_castling_rights(chess.WHITE),
+            board.has_kingside_castling_rights(chess.BLACK),
+            board.has_queenside_castling_rights(chess.BLACK),
+        ]
 
-        for right in castling_planes.values():
-            plane = np.ones((8, 8), dtype=np.float32) if right else np.zeros((8, 8), dtype=np.float32)
-            planes.append(plane)
+        for flag in castling_features:
+            planes.append(np.ones((8,8), np.float32) if flag else np.zeros((8,8), np.float32))
 
-        # If you want to pad to exactly 119 planes
-        while len(planes) < 119:
-            planes.append(np.zeros((8, 8), dtype=np.float32))
+        # 1 extra plane: zeros to reach 18 planes
+        planes.append(np.zeros((8,8), np.float32))
 
-        stacked = np.stack(planes, axis=0)
-        return torch.tensor(stacked, dtype=torch.float32)
+        assert len(planes) == 18, f"Expected 18 planes, got {len(planes)}"
 
-    # ----------------------------------------------------------
-    # PyTorch Dataset API
+        arr = np.stack(planes)
+        return torch.tensor(arr, dtype=torch.float32)
+
+
     # ----------------------------------------------------------
     def __len__(self):
-        return self.n_positions
+        return len(self.samples)
 
     def __getitem__(self, idx):
         return self.samples[idx]
