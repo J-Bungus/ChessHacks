@@ -1,9 +1,5 @@
-import lightning as L
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from transformers import PreTrainedModel, PretrainedConfig
-from transformers import AutoConfig, AutoModel
 
 class ChessModelConfig(PretrainedConfig):
     model_type = "chess-model"

@@ -2,7 +2,8 @@ from torch.utils.data import DataLoader
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 
-from data import NUM_MOVES, NUM_PLANES, ChessPolicyValueDataset
+from data import ChessPolicyValueDataset
+from utils import NUM_MOVES, NUM_PLANES
 from model import ChessModelConfig
 from trainer import ChessTrainer
 
