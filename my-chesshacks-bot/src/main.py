@@ -2,10 +2,14 @@ from .utils import chess_manager, GameContext
 from chess import Move
 import random
 import time
+from transformers import AutoModel
+import os
 
-# Write code here that runs once
-# Can do things like load models from huggingface, make connections to subprocesses, etcwenis
-
+# Load model from Hugging Face
+model = AutoModel.from_pretrained(
+    "darren-lo/chess-bot-model",
+    cache_dir="./.model_cache"  # Cache locally
+)
 
 @chess_manager.entrypoint
 def test_func(ctx: GameContext):
