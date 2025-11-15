@@ -4,3 +4,5 @@ venv
 .env.local
 .env
 devtools
+games.pgn
+archive
