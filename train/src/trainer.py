@@ -11,7 +11,7 @@ class ChessTrainer(L.LightningModule):
 
         self.value_coeff = value_coeff
         self.model = ChessModel(model_config)
-        self.epochs_interval = 1
+        self.upload_freq = 10
 
 
     def on_train_epoch_start(self):
@@ -19,11 +19,11 @@ class ChessTrainer(L.LightningModule):
 
     def on_train_epoch_end(self):
         epoch = self.current_epoch
-        if (epoch + 1) % self.epochs_interval == 0:  # +1 if you want epoch counting from 1
+        if (epoch + 1) % self.upload_freq == 0:  # +1 if you want epoch counting from 1
             branch_name = "checkpoint"
             print(f"Pushing model to Hugging Face Hub: {branch_name}")
             self.model.push_to_hub(
-                self.repo_name,
+                "darren-lo/chess-bot-model",
                 commit_message=f"Checkpoint after epoch {epoch+1}",
                 branch=branch_name
             )
@@ -72,4 +72,4 @@ class ChessTrainer(L.LightningModule):
 
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+        return torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=1e-4)

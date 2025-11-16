@@ -23,8 +23,8 @@ if __name__ == "__main__":
     model_wrapper = ChessTrainer(
         model_config=ChessModelConfig(
             num_moves=NUM_MOVES,
-            num_layers=6,
-            hidden_size=512,
+            num_layers=4,
+            hidden_size=256,
             num_heads=8
         ),
         lr=5e-4
@@ -35,7 +35,7 @@ if __name__ == "__main__":
         devices=1,
         logger=wandb_logger,
         log_every_n_steps=10,
-        check_val_every_n_epoch=10
+        check_val_every_n_epoch=2
     )
 
     trainer.fit(model_wrapper, datamodule=datamodule)

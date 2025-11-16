@@ -96,7 +96,6 @@ class SelfPlayDataset(Dataset):
         self.history_length = history_length
 
         self.samples = []
-        # Determine cache file path
         os.makedirs("./cache", exist_ok=True)
         self.cache_path = "./cache/train_data.pt" if train else "./cache/val_data.pt"
 
@@ -106,40 +105,75 @@ class SelfPlayDataset(Dataset):
             print(f"Loaded {len(self.samples)} samples.")
         else:
             print(f"No cache found. Generating {self.num_games} games...")
-            self._generate_initial_games()
+            self.samples = self._generate_games(self.num_games)
             torch.save(self.samples, self.cache_path)
             print(f"Saved {len(self.samples)} samples to cache: {self.cache_path}")
 
-
-    def _generate_initial_games(self):
+    def _generate_games(self, num_games: int,):
+        """Generates a number of self-play games and returns a list of samples."""
         engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
+        all_samples = []
 
-        for _ in tqdm(range(self.num_games), desc="Generating initial games"):
-            positions, moves, evals_cp = play_self_play_game(
-                engine,
-                max_moves=self.max_moves,
-                movetime=self.movetime
-            )
+        for _ in tqdm(range(num_games), desc="Generating games"):
+            board = chess.Board()
+            game_samples = []
 
-            if len(moves) == 0:
-                continue
+            for _ in range(self.max_moves):
+                if board.is_game_over():
+                    break
 
-            for i, (board, move, eval_cp) in enumerate(zip(positions, moves, evals_cp)):
+                # Get top 20 moves from Stockfish
+                info_list = engine.analyse(board, chess.engine.Limit(time=self.movetime), multipv=10)
+
+                if not info_list:
+                    break
+
+                # Collect moves and evaluations
+                moves, evals = [], []
+                for info in info_list:
+                    move = info["pv"][0]
+                    eval_cp = info["score"].white().score(mate_score=100000)
+                    if eval_cp is None or move.uci() not in MOVE_TO_IDX:
+                        continue
+                    moves.append(move)
+                    evals.append(eval_cp)
+
+                if not moves:
+                    break
+
+                # Sample a move according to probabilities for actual play
+                stm_sign = 1 if board.turn == chess.WHITE else -1
+                stm_evals = np.array([stm_sign * e for e in evals], dtype=np.float32)
+                stm_evals = np.clip(stm_evals, -100000, 100000)
+                probs = np.exp(stm_evals / 200.0)
+                probs /= probs.sum()
+
+                if np.isnan(probs).any():
+                    played_move = moves[0]
+                else:
+                    played_move = np.random.choice(moves, p=probs)
+
+                board.push(played_move)
+
+                # Determine best move for dataset target
+                best_idx = int(np.argmax([stm_sign * e for e in evals]))
+                best_move = moves[best_idx]
+                best_eval = evals[best_idx]
+
+                # Encode board + state for dataset (policy_target = best move)
                 board_tokens = encode_board(board)
                 state = encode_extra_state(board)
+                policy_idx = MOVE_TO_IDX[best_move.uci()]
+                v = torch.tensor(eval_cp_to_target(best_eval), dtype=torch.float32)
 
-                u = move.uci()
-                if u not in MOVE_TO_IDX:
-                    continue
-                policy_idx = MOVE_TO_IDX[u]
+                game_samples.append((board_tokens, state, policy_idx, v))
 
-                v = eval_cp_to_target(eval_cp)
-                v = torch.tensor(v, dtype=torch.float32)
 
-                self.samples.append((board_tokens, state, policy_idx, v))
+            all_samples.extend(game_samples)
 
         engine.quit()
-        print(f"Generated {len(self.samples)} samples from {self.num_games} games.")
+        return all_samples
+
 
     def __len__(self):
         return len(self.samples)
@@ -148,42 +182,12 @@ class SelfPlayDataset(Dataset):
         return self.samples[idx]
 
     def resample(self, fraction: float = 0.1):
-        """
-        Replace a fraction of the dataset with newly generated games.
-        fraction: float in (0,1], fraction of samples to replace
-        """
-        num_replace = max(1, int(len(self.samples) * fraction))
+        """Replace a fraction of the dataset with newly generated games."""
+        # num_replace = max(1, int(len(self.samples) * fraction))
+        num_replace = 30
+        new_samples = self._generate_games(num_replace)
 
-        engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
-
-        new_samples = []
-        while len(new_samples) < num_replace:
-            positions, moves, evals_cp = play_self_play_game(
-                engine,
-                max_moves=self.max_moves,
-                movetime=self.movetime
-            )
-            for i, (board, move, eval_cp) in enumerate(zip(positions, moves, evals_cp)):
-                if len(new_samples) >= num_replace:
-                    break
-
-                board_tokens = encode_board(board)
-                state = encode_extra_state(board)
-
-                u = move.uci()
-                if u not in MOVE_TO_IDX:
-                    continue
-                policy_idx = MOVE_TO_IDX[u]
-
-                v = eval_cp_to_target(eval_cp)
-                v = torch.tensor(v, dtype=torch.float32)
-
-                new_samples.append((board_tokens, state, policy_idx, v))
-
-        engine.quit()
-
-        # Replace random samples in self.samples
-        replace_indices = random.sample(range(len(self.samples)), num_replace)
+        replace_indices = random.sample(range(len(self.samples)), len(new_samples))
         for idx, new_sample in zip(replace_indices, new_samples):
             self.samples[idx] = new_sample
 
