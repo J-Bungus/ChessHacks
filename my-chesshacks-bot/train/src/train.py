@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 
-from data import ChessPolicyValueDataset
+from data import SelfPlayDataset
 from utils import NUM_MOVES
 from model import ChessModelConfig
 from trainer import ChessTrainer
@@ -13,12 +13,9 @@ if __name__ == "__main__":
         name="chess-hacks"
     )
 
-    dataset = ChessPolicyValueDataset(
-        n_positions=32,
-        max_random_moves=30,
+    dataset = SelfPlayDataset(
         stockfish_path="/usr/games/stockfish",
-        stockfish_depth=12,
-        multipv=5
+        num_games=50
     )
 
     train_loader = DataLoader(

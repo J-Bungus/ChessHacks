@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, PretrainedConfig
-from utils import BOARD_VEC_SIZE
+BOARD_VEC_SIZE = 13
 
 class ChessModelConfig(PretrainedConfig):
     model_type = "chess-transformer"

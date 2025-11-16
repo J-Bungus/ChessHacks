@@ -14,9 +14,9 @@ PIECE_TYPES = {
 
 def encode_board(board: chess.Board):
     """
-    Encode board as integer indices (0-12) for nn.Embedding.
-    0-5: white pieces, 6-11: black pieces, 12: empty square
-    Output shape: (64,)
+        Encode board as integer indices (0-12) for nn.Embedding.
+        0-5: white pieces, 6-11: black pieces, 12: empty square
+        Output shape: (64,)
     """
     enc = torch.zeros(64, dtype=torch.long)
 
@@ -46,6 +46,10 @@ def encode_extra_state(board: chess.Board):
         int(board.turn == chess.WHITE)
     ], dtype=torch.long)  # (5,)
 
+
+def encode_piece_history(history_boards):
+    hist = [encode_board(b) for b in history_boards]
+    return hist  # (64, 96)
 
 # ---- Move encoding utilities: 4672 legal UCI moves ----
 ALL_SQUARES = [f"{f}{r}" for f in "abcdefgh" for r in "12345678"]

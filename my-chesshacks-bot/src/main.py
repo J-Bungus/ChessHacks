@@ -10,7 +10,7 @@ import torch
 from src.search import MCTS
 
 # Load model from Hugging Face
-AutoConfig.register("chess-model", ChessModelConfig)
+AutoConfig.register("chess-transformer", ChessModelConfig)
 AutoModel.register(ChessModelConfig, ChessModel)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

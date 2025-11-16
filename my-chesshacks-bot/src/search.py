@@ -1,7 +1,7 @@
 import math
 import torch
 import chess
-from train.src.utils import encode_board, MOVE_TO_IDX
+from train.src.utils import encode_board, MOVE_TO_IDX, encode_extra_state
 
 class MCTSNode:
     def __init__(self, board, parent=None, prior=0.0):
@@ -91,9 +91,10 @@ class MCTS:
 
         # Convert board → tensor
         board_tensor = encode_board(node.board).unsqueeze(0).to(self.device)
+        state = encode_extra_state(node.board).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            policy_logits, value = self.model(board_tensor)
+            policy_logits, value = self.model(board_tensor, state)
 
         policy_probs = torch.softmax(policy_logits[0], dim=-1)
 

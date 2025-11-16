@@ -18,8 +18,7 @@ class ChessTrainer(L.LightningModule):
         policy_logits, value_pred = self.model(x, state)
 
         # --- Policy loss: cross-entropy on full distribution ---
-        log_probs = F.log_softmax(policy_logits, dim=1)
-        policy_loss = -(pi_target * log_probs).sum(dim=1).mean()
+        policy_loss = F.cross_entropy(policy_logits, pi_target)
 
         # --- Value loss ---
         value_pred = value_pred.squeeze(-1)
