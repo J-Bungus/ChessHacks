@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import Dataset
-import chess
+import torch.nn.functional as F
+import chess 
 import chess.engine
 import numpy as np
 import random
@@ -235,49 +236,93 @@ def encode_history_to_tokens(history_boards, rep_flags) -> torch.Tensor:
     feats = np.concatenate([piece_hist, anc_broadcast], axis=1)  # (64, 112)
     return torch.tensor(feats, dtype=torch.float32)
 
-def play_self_play_game(engine, max_moves=200, movetime=0.01):
+def play_self_play_game(
+    engine: chess.engine.SimpleEngine,
+    max_moves: int = 200,
+    nodes: int = 300,
+    multipv: int = 8,
+    epsilon: float = 0.10,   # Dirichlet noise weight
+    alpha: float = 0.3,      # Dirichlet concentration
+):
     """
+    Self-play with exploration.
+
     Returns:
       positions: list[Board] states BEFORE each move
       moves:     list[chess.Move]
-      evals:     list[float] cp evals from side-to-move's POV
+      evals_cp:  list[float] evals in centipawns from side-to-move POV
     """
     board = chess.Board()
     positions = []
     moves = []
-    evals = []
+    evals_cp = []
 
     while not board.is_game_over() and len(moves) < max_moves:
         positions.append(board.copy(stack=False))
 
-        info = engine.analyse(board, chess.engine.Limit(time=movetime))
+        # Ask engine for several candidate moves
+        info = engine.analyse(
+            board,
+            chess.engine.Limit(nodes=nodes),
+            multipv=multipv,
+        )
 
-        score_white = info["score"].white().score(mate_score=100000)
-        if score_white is None:
-            break  # avoid weird mate/NaN
+        if multipv == 1:
+            info = [info]
 
-        # we want eval from *side-to-move* POV
-        # engine gives score from white's POV
-        if board.turn == chess.WHITE:
-            stm_eval_cp = score_white
-        else:
-            stm_eval_cp = -score_white
+        candidate_moves = []
+        candidate_scores = []
 
-        evals.append(stm_eval_cp)
+        for line in info:
+            if "pv" not in line or not line["pv"]:
+                continue
+            mv = line["pv"][0]
+            score_white = line["score"].white().score(mate_score=100000)
+            if score_white is None:
+                continue
 
-        pv = info.get("pv")
-        if not pv:
-            legal_moves = list(board.legal_moves)
-            if not legal_moves:
+            # convert to side-to-move eval in cp
+            stm_eval_cp = score_white if board.turn == chess.WHITE else -score_white
+
+            candidate_moves.append(mv)
+            candidate_scores.append(stm_eval_cp)
+
+        # Fallback if engine didn't give multipv lines for some reason
+        if not candidate_moves:
+            legal = list(board.legal_moves)
+            if not legal:
                 break
-            move = random.choice(legal_moves)
-        else:
-            move = pv[0]
+            mv = random.choice(legal)
+            moves.append(mv)
+            evals_cp.append(0.0)
+            board.push(mv)
+            continue
 
-        moves.append(move)
-        board.push(move)
+        # Save eval for *current* position (using the best candidate as reference)
+        # Here we use the highest-scoring candidate as the eval cp
+        best_idx = max(range(len(candidate_scores)), key=lambda i: candidate_scores[i])
+        best_eval_cp = candidate_scores[best_idx]
+        evals_cp.append(best_eval_cp)
 
-    return positions, moves, evals
+        # Turn scores into a probability distribution over candidate moves
+        scores_tensor = torch.tensor(candidate_scores, dtype=torch.float32)
+
+        # Temperature can be tuned; 400.0 ≈ 1 pawn
+        logits = scores_tensor / 400.0
+        probs = F.softmax(logits, dim=0)
+
+        # Add Dirichlet noise for exploration
+        noise = torch.distributions.Dirichlet(alpha * torch.ones_like(probs)).sample()
+        probs = (1.0 - epsilon) * probs + epsilon * noise
+
+        # Sample a move index from this distribution
+        idx = torch.multinomial(probs, 1).item()
+        mv = candidate_moves[idx]
+
+        moves.append(mv)
+        board.push(mv)
+
+    return positions, moves, evals_cp
 
 def eval_cp_to_target(stm_eval_cp: float) -> float:
     # cp ~400 ≈ 1 pawn advantage → ~0.76 after tanh(1)

@@ -36,7 +36,10 @@ class OnlineSelfPlayDataset(IterableDataset):
                 positions, moves, evals_cp = utils.play_self_play_game(
                     engine,
                     max_moves=self.max_moves,
-                    movetime=self.movetime
+                    nodes=300,     
+                    multipv=8,
+                    epsilon=0.10,
+                    alpha=0.3,
                 )
 
                 if len(moves) == 0:

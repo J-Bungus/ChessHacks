@@ -30,7 +30,7 @@ class ChessModel(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
-        self.num_toks = 70
+        self.num_toks = 64
 
         H = config.hidden_size
         F = config.feature_dim
@@ -38,8 +38,8 @@ class ChessModel(PreTrainedModel):
         self.input_proj = nn.Linear(F, H)
 
         self.pos_embedding = nn.Parameter(torch.zeros(self.num_toks, H))
-        self.state_embeddings = nn.ModuleList([nn.Embedding(2, H) for _ in range(5)])
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, H))
+        #self.state_embeddings = nn.ModuleList([nn.Embedding(2, H) for _ in range(5)])
+        #self.cls_token = nn.Parameter(torch.zeros(1, 1, H))
 
         # 6 piece types
         #self.piece_embedding = nn.Embedding(PIECE_DIM, H)
@@ -77,9 +77,9 @@ class ChessModel(PreTrainedModel):
         #    state_tok_i = self.state_embeddings[i](state[:, i])  # [B, H]
         #    state_toks.append(state_tok_i.unsqueeze(1))  # [B, 1, H]
 
-        state_toks = torch.cat(state_toks, axis=1)
-        cls = self.cls_token.expand(B, -1, -1)
-        tok = torch.cat([cls, state_toks, tok], axis=1) # [B, 69, H]
+        #state_toks = torch.cat(state_toks, axis=1)
+        #cls = self.cls_token.expand(B, -1, -1)
+        #tok = torch.cat([cls, state_toks, tok], axis=1) # [B, 69, H]
 
         tok = tok + self.pos_embedding.unsqueeze(0)
         h = self.transformer(tok)   # [B, 69, H]

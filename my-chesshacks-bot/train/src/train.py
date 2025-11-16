@@ -14,18 +14,16 @@ if __name__ == "__main__":
     )
 
     dataset = OnlineSelfPlayDataset(
-        n_positions=1000,
+        n_positions=1_000,
         max_moves=65,
         stockfish_path="/usr/games/stockfish",
         movetime=0.01
     )
 
-    print("Dataset size: ", len(dataset))
-
     train_loader = DataLoader(
         dataset,
         batch_size=32,
-        num_workers=0
+        num_workers=7
     )
 
     model_wrapper = ChessTrainer(
