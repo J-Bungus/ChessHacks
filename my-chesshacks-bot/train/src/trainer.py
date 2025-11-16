@@ -12,13 +12,10 @@ class ChessTrainer(L.LightningModule):
         self.value_coeff = value_coeff
         self.model = ChessModel(model_config)
 
-    def forward(self, x):
-        return self.model(x)
-
     def training_step(self, batch, batch_idx):
-        x, pi_target, z_target = batch
+        x, state, pi_target, z_target = batch
 
-        policy_logits, value_pred = self(x)
+        policy_logits, value_pred = self.model(x, state)
 
         # --- Policy loss: cross-entropy on full distribution ---
         log_probs = F.log_softmax(policy_logits, dim=1)

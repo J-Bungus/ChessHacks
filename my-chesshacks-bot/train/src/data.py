@@ -4,7 +4,7 @@ import chess
 import chess.engine
 import numpy as np
 import random
-from utils import encode_board, MOVE_TO_IDX, NUM_MOVES
+from utils import encode_board, MOVE_TO_IDX, NUM_MOVES, encode_extra_state
 
 class ChessPolicyValueDataset(Dataset):
     """
@@ -41,7 +41,8 @@ class ChessPolicyValueDataset(Dataset):
             policy_target, value_target = result
 
             x = encode_board(board)
-            self.samples.append((x, policy_target, value_target))
+            state = encode_extra_state(board)
+            self.samples.append((x, state, policy_target, value_target))
 
         self.engine.quit()
 

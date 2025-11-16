@@ -3,7 +3,7 @@ import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 
 from data import ChessPolicyValueDataset
-from utils import NUM_MOVES, NUM_PLANES
+from utils import NUM_MOVES
 from model import ChessModelConfig
 from trainer import ChessTrainer
 
@@ -16,7 +16,7 @@ if __name__ == "__main__":
     dataset = ChessPolicyValueDataset(
         n_positions=32,
         max_random_moves=30,
-        stockfish_path="/opt/homebrew/bin/stockfish",
+        stockfish_path="/usr/games/stockfish",
         stockfish_depth=12,
         multipv=5
     )
@@ -30,7 +30,6 @@ if __name__ == "__main__":
 
     model_wrapper = ChessTrainer(
         model_config=ChessModelConfig(
-            input_channels=NUM_PLANES,
             num_moves=NUM_MOVES
         )
     )

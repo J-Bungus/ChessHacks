@@ -1,50 +1,51 @@
 import torch
-import numpy as np
 import chess
 
-NUM_PLANES = 17
+BOARD_VEC_SIZE = 13  # 6 piece types per color + 1 for empty
+NUM_PIECE_TYPES = 6
+PIECE_TYPES = {
+    chess.PAWN: 0,
+    chess.KNIGHT: 1,
+    chess.BISHOP: 2,
+    chess.ROOK: 3,
+    chess.QUEEN: 4,
+    chess.KING: 5
+}
 
-def encode_board(board):
-    planes = []
+def encode_board(board: chess.Board):
+    """
+    Encode board as integer indices (0-12) for nn.Embedding.
+    0-5: white pieces, 6-11: black pieces, 12: empty square
+    Output shape: (64,)
+    """
+    enc = torch.zeros(64, dtype=torch.long)
 
-    piece_types = [chess.PAWN, chess.KNIGHT, chess.BISHOP,
-                    chess.ROOK, chess.QUEEN, chess.KING]
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
 
-    # 12 piece planes
-    for piece_type in piece_types:
-        # white
-        p = np.zeros((8, 8), np.float32)
-        for sq in board.pieces(piece_type, chess.WHITE):
-            r = 7 - chess.square_rank(sq)
-            c = chess.square_file(sq)
-            p[r, c] = 1.0
-        planes.append(p)
+        if piece is None:
+            enc[square] = 12  # empty square
+        else:
+            base_idx = PIECE_TYPES[piece.piece_type]
+            if piece.color == chess.BLACK:
+                base_idx += NUM_PIECE_TYPES
+            enc[square] = base_idx
 
-        # black
-        p = np.zeros((8, 8), np.float32)
-        for sq in board.pieces(piece_type, chess.BLACK):
-            r = 7 - chess.square_rank(sq)
-            c = chess.square_file(sq)
-            p[r, c] = 1.0
-        planes.append(p)
+    return enc  # (64,)
 
-    # side-to-move
-    stm = np.ones((8,8), np.float32) if board.turn else np.zeros((8,8), np.float32)
-    planes.append(stm)
+def encode_extra_state(board: chess.Board):
+    """
+    Encode extra state as integer indices for embedding (if desired, could use same embedding approach)
+    Shape: (5,)
+    """
+    return torch.tensor([
+        int(board.has_kingside_castling_rights(chess.WHITE)),
+        int(board.has_queenside_castling_rights(chess.WHITE)),
+        int(board.has_kingside_castling_rights(chess.BLACK)),
+        int(board.has_queenside_castling_rights(chess.BLACK)),
+        int(board.turn == chess.WHITE)
+    ], dtype=torch.long)  # (5,)
 
-    # castling rights
-    for flag in [
-        board.has_kingside_castling_rights(chess.WHITE),
-        board.has_queenside_castling_rights(chess.WHITE),
-        board.has_kingside_castling_rights(chess.BLACK),
-        board.has_queenside_castling_rights(chess.BLACK)
-    ]:
-        planes.append(np.ones((8,8), np.float32) if flag else np.zeros((8,8), np.float32))
-
-    arr = np.stack(planes)
-    assert len(arr) == NUM_PLANES
-    
-    return torch.tensor(arr, dtype=torch.float32)
 
 # ---- Move encoding utilities: 4672 legal UCI moves ----
 ALL_SQUARES = [f"{f}{r}" for f in "abcdefgh" for r in "12345678"]
