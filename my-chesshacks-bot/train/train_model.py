@@ -1,78 +1,89 @@
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-import pandas as pd
 import chess
+import pandas as pd
+import torch
+from torch.utils.data import Dataset
+from tqdm import tqdm
 
-from stockfish_eval_model import encode_board, ChessEvaluator
+from stockfish_eval_model import encode_pair, PositionRankNet
 
-# ----------------------------
-# Dataset Class for FEN → Tensor
-# ----------------------------
-class ChessDataset(Dataset):
-    def __init__(self, csv_file):
-        df = pd.read_csv(csv_file)
-        self.fens = df["fen"].tolist()
-        self.scores = df["score"].astype(float).tolist()
+class PairRankingCSVDataset(Dataset):
+    """
+    Loads training_pairs.csv generated earlier.
+    Each row: fen_a, fen_b, label
+    """
+    def __init__(self, csv_path):
+        self.df = pd.read_csv(csv_path)
 
     def __len__(self):
-        return len(self.fens)
+        return len(self.df)
 
     def __getitem__(self, idx):
-        board = chess.Board(self.fens[idx])
-        x = encode_board(board)
-        y = torch.tensor([self.scores[idx]], dtype=torch.float32)
+        row = self.df.iloc[idx]
+        
+        fen_a = row["fen_a"]
+        fen_b = row["fen_b"]
+        label = row["label"]
+
+        board_a = chess.Board(fen_a)
+        board_b = chess.Board(fen_b)
+
+        # YOUR encoder functions (already implemented earlier)
+        x = encode_pair(board_a, board_b)    # (36, 8, 8)
+        x = torch.tensor(x, dtype=torch.float32)
+        y = torch.tensor([label], dtype=torch.float32)  # (1,)
+
         return x, y
 
+import torch
+from torch.utils.data import DataLoader
 
-# ----------------------------
-# Training Loop
-# ----------------------------
-def train_model(csv_path, epochs=10, batch_size=64, lr=0.001):
+def train_ranking_model(
+    csv_path,
+    model,
+    epochs=5,
+    batch_size=32,
+    lr=1e-4,
+    device="cuda" if torch.cuda.is_available() else "cpu"
+):
+    dataset = PairRankingCSVDataset(csv_path)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    dataset = ChessDataset(csv_path)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    model = ChessEvaluator()
+    model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss() 
+    criterion = torch.nn.MSELoss()
 
-    model.train()
+    for epoch in range(1, epochs + 1):
+        model.train()
+        total_loss = 0.0
 
-    for epoch in range(epochs):
-        total_loss = 0
-
-        for x, y in dataloader:
-            x = x.float()
-            y = y.float()
-
-            # Add batch dimension to input: (B, 18, 8, 8)
-            x = x.to(device)
-            y = y.to(device)
+        for x, y in tqdm(loader):
+            x = x.to(device)         # (batch, 36, 8, 8)
+            y = y.to(device)         # (batch, 1)
 
             optimizer.zero_grad()
-            predictions = model(x).squeeze(1)
-            loss = criterion(predictions, y.squeeze(1))
+            preds = model(x)         # (batch, 1)
+
+            loss = criterion(preds, y)
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item() * x.size(0)
 
-        avg_loss = total_loss / len(dataset)
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.6f}")
-
-    # Save the trained model
-    torch.save(model.state_dict(), "chess_evaluator.pth")
-    print("Model saved to chess_evaluator.pth")
+        epoch_loss = total_loss / len(dataset)
+        print(f"Epoch {epoch}/{epochs}  Loss: {epoch_loss:.4f}")
 
     return model
 
+model = PositionRankNet()
 
-# ----------------------------
-# Run Training
-# ----------------------------
-if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("Training on:", device)
+trained_model = train_ranking_model(
+    csv_path="train.csv",
+    model=model,
+    epochs=5,
+    batch_size=64,
+    lr=1e-4
+)
 
-    train_model("archive/stockfish_positions3.csv", epochs=20, batch_size=128, lr=0.0005)
+torch.save(trained_model.state_dict(), "position_rank_net.pth")
+print("Model saved to position_rank_net.pth")
+

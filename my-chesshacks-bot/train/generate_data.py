@@ -1,162 +1,99 @@
 import chess
 import chess.pgn
 import chess.engine
-import multiprocessing as mp
 import pandas as pd
+import itertools
 from tqdm import tqdm
-import os
-import time
 
-# ---------------------------------------
-# CONFIG
-# ---------------------------------------
-PGN_FILE = "games.pgn"      # your PGN file
-OUTPUT_CSV = "stockfish_positions.csv"
+# --------------------------------------------------------------
+# Stockfish (or any UCI engine) Initialization
+# --------------------------------------------------------------
 STOCKFISH_PATH = r"C:\Users\mike-\Downloads\applications\stockfish-windows-x86-64-avx2\stockfish\stockfish-windows-x86-64-avx2.exe"  # path to engine
-EVAL_DEPTH = 12
-NUM_WORKERS = 4             # Number of parallel Stockfish engines
-MAX_POSITIONS = 50000
-SAMPLE_EVERY = 1            # Evaluate every Nth ply
-CHUNK_SIZE = 200            # How often to flush results to disk
+engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
-# ---------------------------------------------------------
-# Worker: runs in each process
-# ---------------------------------------------------------
-def worker_process(task_queue, result_queue, worker_id):
+def evaluate_position(board: chess.Board, depth=12):
+    """
+    Uses python-chess.engine to evaluate a position.
+    Returns score in pawns (float).
+    """
+    info = engine.analyse(board, chess.engine.Limit(depth=depth))
 
-    engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+    score = info["score"].pov(chess.WHITE)
 
-    while True:
-        item = task_queue.get()
+    if score.is_mate():
+        # Large positive or negative value
+        return 1000.0 if score.mate() > 0 else -1000.0
+    else:
+        return score.score() / 100.0  # convert centipawns → pawns
 
-        if item == "STOP":
-            break
+def load_positions_from_pgn(pgn_path, max_positions=500):
+    """
+    Yield up to max_positions unique positions from games in a PGN.
+    """
+    positions = 0
 
-        fen = item
-        board = chess.Board(fen)
-
-        # Evaluate position
-        try:
-            info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
-            score = info["score"].pov(chess.WHITE)
-
-            if score.is_mate():
-                eval_score = 10 if score.mate() > 0 else -10
-            else:
-                eval_score = score.score() / 100.0  # convert cp to pawns
-
-        except Exception as e:
-            eval_score = None
-
-        # Send result back
-        result_queue.put((fen, eval_score))
-
-    engine.quit()
-
-
-# ---------------------------------------------------------
-# CSV Writer: runs in main process
-# ---------------------------------------------------------
-def writer_process(result_queue, total_expected):
-
-    buffer = []
-    processed = 0
-
-    # Create CSV with header if missing
-    if not os.path.exists(OUTPUT_CSV):
-        with open(OUTPUT_CSV, "w") as f:
-            f.write("fen,score\n")
-
-    pbar = tqdm(total=total_expected, desc="Evaluating positions")
-
-    while processed < total_expected:
-        fen, score = result_queue.get()
-        processed += 1
-        pbar.update(1)
-
-        buffer.append((fen, score))
-
-        # Flush buffer periodically
-        if len(buffer) >= CHUNK_SIZE:
-            df = pd.DataFrame(buffer, columns=["fen", "score"])
-            df.to_csv(OUTPUT_CSV, mode="a", header=False, index=False)
-            buffer = []
-
-    # Final flush
-    if buffer:
-        df = pd.DataFrame(buffer, columns=["fen", "score"])
-        df.to_csv(OUTPUT_CSV, mode="a", header=False, index=False)
-
-    pbar.close()
-    print("\nFinished writing results.")
-
-
-# ---------------------------------------------------------
-# Main PGN reader and process launcher
-# ---------------------------------------------------------
-def generate_dataset_parallel():
-    print("Scanning PGN for positions...")
-
-    # First pass: extract all FENs
-    fens = []
-    with open(PGN_FILE, "r", encoding="utf-8", errors="ignore") as f:
-        while True:
+    with open(pgn_path) as f:
+        while positions < max_positions:
             game = chess.pgn.read_game(f)
             if game is None:
                 break
 
             board = game.board()
-            for ply, move in enumerate(game.mainline_moves()):
+            for move in game.mainline_moves():
+                yield board.copy()
+                positions += 1
+                if positions >= max_positions:
+                    return
                 board.push(move)
 
-                if ply % SAMPLE_EVERY == 0:
-                    fens.append(board.fen())
+def generate_sibling_pairs(board: chess.Board):
+    """
+    For a given board, generate all pairs of legal child positions
+    labeled according to Stockfish's ranking.
+    """
+    legal = list(board.legal_moves)
+    if len(legal) < 2:
+        return
 
-                if len(fens) >= MAX_POSITIONS:
-                    break
+    children = []
+    for mv in legal:
+        child = board.copy()
+        child.push(mv)
+        score = evaluate_position(child)
+        children.append((child, score))
 
-            if len(fens) >= MAX_POSITIONS:
-                break
+    # All unique pairs of siblings
+    for (b1, s1), (b2, s2) in itertools.combinations(children, 2):
+        if s1 == s2:
+            continue
+        label = 1 if s1 > s2 else -1
+        yield b1.fen(), b2.fen(), label
 
-    total_positions = len(fens)
-    print(f"Collected {total_positions} positions.")
+def build_csv_dataset(pgn_path, csv_path, max_positions=500):
+    """
+    Extract sibling pairs from up to max_positions PGN positions
+    and save them to a CSV file.
+    """
+    rows = []
 
-    # Create multiprocessing queues
-    task_queue = mp.Queue(maxsize=2000)
-    result_queue = mp.Queue(maxsize=2000)
+    for board in tqdm(load_positions_from_pgn(pgn_path, max_positions=max_positions), total=max_positions):
+        for fen_a, fen_b, label in generate_sibling_pairs(board):
+            rows.append({
+                "fen_a": fen_a,
+                "fen_b": fen_b,
+                "label": label
+            })
 
-    # Start workers
-    workers = []
-    for i in range(NUM_WORKERS):
-        p = mp.Process(target=worker_process, args=(task_queue, result_queue, i))
-        p.start()
-        workers.append(p)
+    df = pd.DataFrame(rows)
+    df.to_csv(csv_path, index=False)
 
-    # Start writer in the main process
-    writer = mp.Process(target=writer_process, args=(result_queue, total_positions))
-    writer.start()
+    print(f"Saved {len(df)} samples → {csv_path}")
+    return df
 
-    # Feed tasks
-    for fen in fens:
-        task_queue.put(fen)
+df = build_csv_dataset(
+    pgn_path="games.pgn",
+    csv_path="pairs.csv",
+    max_positions=2000
+)
 
-    # Send STOP signals
-    for _ in workers:
-        task_queue.put("STOP")
-
-    # Wait for workers to finish
-    for p in workers:
-        p.join()
-
-    # Wait for writer to finish
-    writer.join()
-
-    print("Dataset generation complete!")
-
-
-# ---------------------------------------------------------
-# Run
-# ---------------------------------------------------------
-if __name__ == "__main__":
-    mp.set_start_method("spawn")  # Required on Windows
-    generate_dataset_parallel()
+engine.quit()
