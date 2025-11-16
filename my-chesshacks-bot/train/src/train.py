@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 
-from data import SelfPlayDataset
+from data import SelfPlayDataModule, SelfPlayDataset
 from utils import NUM_MOVES
 from model import ChessModelConfig
 from trainer import ChessTrainer
@@ -13,18 +13,11 @@ if __name__ == "__main__":
         name="chess-hacks"
     )
 
-    dataset = SelfPlayDataset(
+    datamodule = SelfPlayDataModule(
         stockfish_path="/usr/games/stockfish",
-        num_games=50
-    )
-
-    print("Dataset size: ", len(dataset))
-
-    train_loader = DataLoader(
-        dataset,
-        batch_size=32,
-        shuffle=True,
-        pin_memory=True
+        batch_size=256,
+        num_train_games=1000,
+        num_val_games=10
     )
 
     model_wrapper = ChessTrainer(
@@ -34,17 +27,18 @@ if __name__ == "__main__":
             hidden_size=512,
             num_heads=8
         ),
-        lr=1e-5
+        lr=5e-4
     )
 
     trainer = L.Trainer(
-        max_epochs=100,
+        max_epochs=1000,
         devices=1,
         logger=wandb_logger,
-        log_every_n_steps=10  # optional, smoother wandb logs
+        log_every_n_steps=10,
+        check_val_every_n_epoch=10
     )
 
-    trainer.fit(model_wrapper, train_loader)
+    trainer.fit(model_wrapper, datamodule=datamodule)
 
     # Save to automodel
     model = model_wrapper.model
