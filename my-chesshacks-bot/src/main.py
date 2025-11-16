@@ -6,7 +6,7 @@ from .model import PositionRankNet, rank_siblings
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = PositionRankNet().to(device)
-model.load_state_dict(torch.load("src/model/400k_pairs.pth", map_location=device))
+model.load_state_dict(torch.load("src/model/800k_pairs.pth", map_location=device))
 model.eval()  # VERY IMPORTANT!
 
 
