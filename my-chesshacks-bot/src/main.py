@@ -5,7 +5,7 @@ import time
 from transformers import AutoModel, AutoConfig
 import os
 from train.src.model import ChessModel, ChessModelConfig
-from train.src.utils import encode_board, MOVE_TO_IDX
+from train.src.utils import MOVE_TO_IDX
 import torch
 from src.search import MCTS
 
@@ -14,19 +14,17 @@ AutoConfig.register("chess-transformer", ChessModelConfig)
 AutoModel.register(ChessModelConfig, ChessModel)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 model = AutoModel.from_pretrained(
-    "darren-lo/chess-bot-model",
+    "jbungus/chess-bot-model",
     cache_dir="./.model_cache"  # Cache locally
 )
 model = model.to(device=device)
-
+mcts_class = MCTS(model, simulations=200, device=next(model.parameters()).device)
 
 def mcts(ctx: GameContext):
-    mcts = MCTS(model, simulations=200, device=next(model.parameters()).device)
-
-    root = mcts.run(ctx.board)
-    best_move = mcts.choose_move(root)
-
+    root = mcts_class.run(ctx.board)
+    best_move = mcts_class.choose_move(root)
     # This also logs probabilities:
     move_probs = {move: child.N for move, child in root.children.items()}
     total = sum(move_probs.values())

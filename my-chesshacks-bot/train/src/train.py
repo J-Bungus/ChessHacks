@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 
-from data import SelfPlayDataset
+from data import OnlineSelfPlayDataset
 from utils import NUM_MOVES
 from model import ChessModelConfig
 from trainer import ChessTrainer
@@ -13,9 +13,11 @@ if __name__ == "__main__":
         name="chess-hacks"
     )
 
-    dataset = SelfPlayDataset(
+    dataset = OnlineSelfPlayDataset(
+        n_positions=1000,
+        max_moves=65,
         stockfish_path="/usr/games/stockfish",
-        num_games=50
+        movetime=0.01
     )
 
     print("Dataset size: ", len(dataset))
@@ -23,8 +25,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(
         dataset,
         batch_size=32,
-        shuffle=True,
-        pin_memory=True
+        num_workers=0
     )
 
     model_wrapper = ChessTrainer(
@@ -48,6 +49,6 @@ if __name__ == "__main__":
 
     # Save to automodel
     model = model_wrapper.model
-    model.push_to_hub("darren-lo/chess-bot-model")
+    model.push_to_hub("jbungus/chess-bot-model")
 
     wandb_logger.experiment.finish()

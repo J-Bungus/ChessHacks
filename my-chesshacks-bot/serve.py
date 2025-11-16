@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -66,5 +65,5 @@ async def get_move(request: Request):
     return JSONResponse(content={"move": move.uci(), "error": None, "time_taken": time_taken, "move_probs": move_probs_dict, "logs": logs})
 
 if __name__ == "__main__":
-    port = int(os.getenv("SERVE_PORT", "5058"))
+    port = int(os.getenv("SERVE_PORT", "5050"))
     uvicorn.run(app, host="0.0.0.0", port=port)

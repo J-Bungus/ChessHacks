@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, PretrainedConfig
-BOARD_VEC_SIZE = 13
+#PIECE_DIM = 13
 
 class ChessModelConfig(PretrainedConfig):
     model_type = "chess-transformer"
@@ -13,6 +13,7 @@ class ChessModelConfig(PretrainedConfig):
         num_layers=4,
         num_heads=8,
         dropout=0.1,
+        feature_dim=21,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -21,6 +22,7 @@ class ChessModelConfig(PretrainedConfig):
         self.num_layers = num_layers
         self.num_heads = num_heads
         self.dropout = dropout
+        self.feature_dim = feature_dim
 
 class ChessModel(PreTrainedModel):
     config_class = ChessModelConfig
@@ -31,13 +33,16 @@ class ChessModel(PreTrainedModel):
         self.num_toks = 70
 
         H = config.hidden_size
+        F = config.feature_dim
+
+        self.input_proj = nn.Linear(F, H)
 
         self.pos_embedding = nn.Parameter(torch.zeros(self.num_toks, H))
         self.state_embeddings = nn.ModuleList([nn.Embedding(2, H) for _ in range(5)])
         self.cls_token = nn.Parameter(torch.zeros(1, 1, H))
 
-        # 6 piece types + empty space
-        self.piece_embedding = nn.Embedding(BOARD_VEC_SIZE, H)
+        # 6 piece types
+        #self.piece_embedding = nn.Embedding(PIECE_DIM, H)
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=H,
@@ -63,24 +68,20 @@ class ChessModel(PreTrainedModel):
             nn.Tanh()
         )
 
-    def forward(self, x, state):
-        B, D = x.shape
-        assert D == 64
+    def forward(self, x):
+        B = x.shape[0]
 
-        tok = self.piece_embedding(x)      # [B, 64, H]
+        tok = self.input_proj(x)      # [B, 64, H]
 
-        state_toks = []
-
-        for i in range(len(self.state_embeddings)):
-            state_tok_i = self.state_embeddings[i](state[:, i])  # [B, H]
-            state_toks.append(state_tok_i.unsqueeze(1))  # [B, 1, H]
+        #for i in range(len(self.state_embeddings)):
+        #    state_tok_i = self.state_embeddings[i](state[:, i])  # [B, H]
+        #    state_toks.append(state_tok_i.unsqueeze(1))  # [B, 1, H]
 
         state_toks = torch.cat(state_toks, axis=1)
         cls = self.cls_token.expand(B, -1, -1)
         tok = torch.cat([cls, state_toks, tok], axis=1) # [B, 69, H]
 
-        tok = tok + self.pos_embedding
-
+        tok = tok + self.pos_embedding.unsqueeze(0)
         h = self.transformer(tok)   # [B, 69, H]
         h = h[:, 0, :]
 

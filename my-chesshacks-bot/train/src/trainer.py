@@ -13,12 +13,18 @@ class ChessTrainer(L.LightningModule):
         self.model = ChessModel(model_config)
 
     def training_step(self, batch, batch_idx):
-        x, state, pi_target, z_target = batch
+        x, pi_target, z_target = batch
 
-        policy_logits, value_pred = self.model(x, state)
+        policy_logits, value_pred = self.model(x)
 
-        # --- Policy loss: cross-entropy on full distribution ---
-        policy_loss = F.cross_entropy(policy_logits, pi_target)
+        # --- Policy loss:
+        if pi_target.dtype == torch.long or pi_target.dtype == torch.int64:
+            # pi_target is a class index: shape [B]
+            policy_loss = F.cross_entropy(policy_logits, pi_target)
+        else:
+            # pi_target is a full distribution over moves: shape [B, num_moves]
+            log_probs = F.log_softmax(policy_logits, dim=1)
+            policy_loss = -(pi_target * log_probs).sum(dim=1).mean()
 
         # --- Value loss ---
         value_pred = value_pred.squeeze(-1)
