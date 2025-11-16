@@ -28,12 +28,13 @@ class ChessModel(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
-        self.num_toks = 69
+        self.num_toks = 70
 
         H = config.hidden_size
 
         self.pos_embedding = nn.Parameter(torch.zeros(self.num_toks, H))
         self.state_embeddings = nn.ModuleList([nn.Embedding(2, H) for _ in range(5)])
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, H))
 
         # 6 piece types + empty space
         self.piece_embedding = nn.Embedding(BOARD_VEC_SIZE, H)
@@ -52,13 +53,13 @@ class ChessModel(PreTrainedModel):
         )
 
         self.policy_head = nn.Sequential(
-            nn.Linear(H * self.num_toks, config.num_moves)
+            nn.Linear(H, config.num_moves)
         )
 
         self.value_head = nn.Sequential(
-            nn.Linear(H * self.num_toks, H),
+            nn.Linear(H, H * 8),
             nn.ReLU(),
-            nn.Linear(H, 1),
+            nn.Linear(H * 8, 1),
             nn.Tanh()
         )
 
@@ -75,12 +76,13 @@ class ChessModel(PreTrainedModel):
             state_toks.append(state_tok_i.unsqueeze(1))  # [B, 1, H]
 
         state_toks = torch.cat(state_toks, axis=1)
-        tok = torch.cat([state_toks, tok], axis=1) # [B, 69, H]
+        cls = self.cls_token.expand(B, -1, -1)
+        tok = torch.cat([cls, state_toks, tok], axis=1) # [B, 69, H]
 
         tok = tok + self.pos_embedding
 
         h = self.transformer(tok)   # [B, 69, H]
-        h = h.reshape((B, -1))
+        h = h[:, 0, :]
 
         policy_logits = self.policy_head(h)
         value = self.value_head(h)

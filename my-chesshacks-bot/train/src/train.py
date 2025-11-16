@@ -18,6 +18,8 @@ if __name__ == "__main__":
         num_games=50
     )
 
+    print("Dataset size: ", len(dataset))
+
     train_loader = DataLoader(
         dataset,
         batch_size=32,
@@ -27,12 +29,16 @@ if __name__ == "__main__":
 
     model_wrapper = ChessTrainer(
         model_config=ChessModelConfig(
-            num_moves=NUM_MOVES
-        )
+            num_moves=NUM_MOVES,
+            num_layers=6,
+            hidden_size=512,
+            num_heads=8
+        ),
+        lr=1e-5
     )
 
     trainer = L.Trainer(
-        max_epochs=5,
+        max_epochs=100,
         devices=1,
         logger=wandb_logger,
         log_every_n_steps=10  # optional, smoother wandb logs
